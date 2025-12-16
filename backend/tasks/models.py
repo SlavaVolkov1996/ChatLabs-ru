@@ -34,7 +34,7 @@ class Category(models.Model):  # Категория
         created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
         due_date = models.DateTimeField(null=True, blank=True, verbose_name="Дата выполнения")
         user_id = models.BigIntegerField(verbose_name="ID пользователя Telegram")
-        categories = models.ManyToManyField(Category, blank=True, verbose_name="Категории")
+        categories = models.ManyToManyField('Category', blank=True, verbose_name="Категории")
 
         def save(self, *args, **kwargs):
             if not self.id:
