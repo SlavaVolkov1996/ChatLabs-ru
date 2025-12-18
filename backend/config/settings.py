@@ -35,8 +35,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'django_filters',  # для фильтрации в API
-    'tasks',  # наше приложение чтоб джанго видел
+    'rest_framework',
+    'django_filters',   # для фильтрации в API
+    'tasks',            # наше приложение чтоб джанго видел
 ]
 
 MIDDLEWARE = [
