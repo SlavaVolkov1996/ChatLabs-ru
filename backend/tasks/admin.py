@@ -1,5 +1,5 @@
 from django.contrib import admin
-
+# админка для управления данными(суперпользователь)
 # Register your models here.
 
 from .models import Task, Category
