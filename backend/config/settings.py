@@ -36,8 +36,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'django_filters',   # для фильтрации в API
-    'tasks',            # наше приложение чтоб джанго видел
+    'django_filters',  # для фильтрации в API
+    'tasks',  # наше приложение чтоб джанго видел
 ]
 
 MIDDLEWARE = [
@@ -123,3 +123,19 @@ REST_FRAMEWORK = {
         'rest_framework.filters.OrderingFilter',
     ],
 }  # доступ API-запросов, для разработки
+
+# Настройки Celery
+CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Для Docker будет redis, для локально localhost
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'  # Место, где будут храниться результаты выполнения задач
+CELERY_ACCEPT_CONTENT = ['json']  # Список форматов данных, которые Celery разрешено принимать.
+CELERY_TASK_SERIALIZER = 'json'  # Определяет, в каком формате задача будет «упакована» перед отправкой в Redis.
+CELERY_RESULT_SERIALIZER = 'json'  # Определяет формат «упаковки» результата выполнения задачи.
+CELERY_TIMEZONE = 'America/Adak'  # Часовой пояс такой же как в Django
+
+# Расписание для периодических задач (Celery Beat) с будильником
+CELERY_BEAT_SCHEDULE = {
+    'check-overdue-tasks-every-5-minutes': {
+        'task': 'tasks.tasks.check_overdue_tasks',
+        'schedule': 30.0,  # Каждые 300 секунд (5 минут)
+    },
+}
