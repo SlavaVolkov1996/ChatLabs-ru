@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # PostgreSQL база данных
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: postgres_DB_table
+      POSTGRES_USER: slava_volkov_1996
+      POSTGRES_PASSWORD: 1qaz2wsx3edc4rfv
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Redis для Celery
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Django бэкенд
+  backend:
+    build: ./backend
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000"
+    environment:
+      # Настройки Django
+      DJANGO_SETTINGS_MODULE: config.settings
+      DATABASE_URL: postgresql://slava_volkov_1996:1qaz2wsx3edc4rfv@postgres:5432/postgres_DB_table
+      SECRET_KEY: django-insecure-secret-key-for-development
+      DEBUG: "True"
+      # Настройки Celery
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+
+  # Celery worker
+  celery_worker:
+    build: ./backend
+    command: celery -A config worker --loglevel=info
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings
+      DATABASE_URL: postgresql://slava_volkov_1996:1qaz2wsx3edc4rfv@postgres:5432/postgres_DB_table
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - postgres
+      - redis
+      - backend
+
+  # Celery beat (планировщик)
+  celery_beat:
+    build: ./backend
+    command: celery -A config beat --loglevel=info
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings
+      DATABASE_URL: postgresql://slava_volkov_1996:1qaz2wsx3edc4rfv@postgres:5432/postgres_DB_table
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - postgres
+      - redis
+      - backend
+
+  # Телеграм-бот
+  bot:
+    build: ./bot
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      API_URL: http://backend:8000/api
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
