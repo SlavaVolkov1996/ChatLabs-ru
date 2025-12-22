@@ -1,88 +1,125 @@
 version: '3.8'
 
 services:
-  # PostgreSQL база данных
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: postgres_DB_table
-      POSTGRES_USER: slava_volkov_1996
-      POSTGRES_PASSWORD: 1qaz2wsx3edc4rfv
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Redis для Celery
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Django бэкенд
   backend:
     build: ./backend
     command: >
-      sh -c "python manage.py migrate &&
+      sh -c "python wait_for_db.py &&
+             python manage.py migrate &&
              python manage.py collectstatic --noinput &&
-             gunicorn config.wsgi:application --bind 0.0.0.0:8000"
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"
     environment:
-      # Настройки Django
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DEBUG: ${DJANGO_DEBUG}
       DJANGO_SETTINGS_MODULE: config.settings
-      DATABASE_URL: postgresql://slava_volkov_1996:1qaz2wsx3edc4rfv@postgres:5432/postgres_DB_table
-      SECRET_KEY: django-insecure-secret-key-for-development
-      DEBUG: "True"
-      # Настройки Celery
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS}
     volumes:
       - ./backend:/app
+      - static_volume:/app/staticfiles
     ports:
       - "8000:8000"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/health/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
-  # Celery worker
   celery_worker:
     build: ./backend
-    command: celery -A config worker --loglevel=info
+    command: >
+      sh -c "python wait_for_db.py &&
+             celery -A config worker --loglevel=info --concurrency=4"
     environment:
-      DJANGO_SETTINGS_MODULE: config.settings
-      DATABASE_URL: postgresql://slava_volkov_1996:1qaz2wsx3edc4rfv@postgres:5432/postgres_DB_table
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DEBUG: ${DJANGO_DEBUG}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
     volumes:
       - ./backend:/app
     depends_on:
-      - postgres
-      - redis
-      - backend
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
-  # Celery beat (планировщик)
   celery_beat:
     build: ./backend
-    command: celery -A config beat --loglevel=info
+    command: >
+      sh -c "python wait_for_db.py &&
+             celery -A config beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler"
     environment:
-      DJANGO_SETTINGS_MODULE: config.settings
-      DATABASE_URL: postgresql://slava_volkov_1996:1qaz2wsx3edc4rfv@postgres:5432/postgres_DB_table
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DEBUG: ${DJANGO_DEBUG}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
     volumes:
       - ./backend:/app
     depends_on:
-      - postgres
-      - redis
-      - backend
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
-  # Телеграм-бот
   bot:
     build: ./bot
+    command: python main.py
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
       API_URL: http://backend:8000/api
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+    volumes:
+      - ./bot:/app
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+  redis_data:
+  static_volume:

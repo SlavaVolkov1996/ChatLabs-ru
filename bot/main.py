@@ -1,194 +1,207 @@
 import asyncio
 import logging
+import os
 from datetime import datetime
+from typing import Optional
 
-from aiogram import Bot, Dispatcher
-from aiogram.types import Message
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery
+from aiogram_dialog import DialogManager, StartMode, setup_dialogs
+from aiogram_dialog.widgets.kbd import Button
+from dotenv import load_dotenv
 
-from config import BOT_TOKEN
+from dialogs.task_dialog import task_dialog, TaskDialog
 from services.api_client import APIClient
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
+load_dotenv()
 
-# Создаем объекты
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+API_URL = os.getenv('API_URL', 'http://backend:8000/api')
+
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN не установлен в переменных окружения")
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-api_client = APIClient()
 
 
-# ---------- Обработчики команд ----------
+async def check_api_health():
+    """Проверка доступности API"""
+    try:
+        async with APIClient(API_URL) as client:
+            result = await client._request('GET', 'health/')
+            return result is not None
+    except Exception as e:
+        logger.error(f"Ошибка проверки API: {e}")
+        return False
+
 
 @dp.message(Command("start"))
-async def cmd_start(message: Message):
-    """Приветственное сообщение"""
-    welcome_text = (
-        "👋 Привет! Я бот для управления задачами.\n\n"
-        "📋 Доступные команды:\n"
-        "/start - приветствие\n"
+async def cmd_start(message: Message, dialog_manager: DialogManager):
+    await message.answer(
+        "👋 *Добро пожаловать в ToDo List бот!*\n\n"
+        "Я помогу вам управлять вашими задачами.\n\n"
+        "📋 *Доступные команды:*\n"
+        "/start - это сообщение\n"
         "/tasks - показать мои задачи\n"
         "/add - добавить задачу\n"
+        "/menu - открыть меню\n"
         "/help - помощь\n\n"
-        "🆔 Ваш ID: {user_id}"
-    ).format(user_id=message.from_user.id)
-
-    await message.answer(welcome_text)
-
-
-@dp.message(Command("help"))
-async def cmd_help(message: Message):
-    """Помощь по командам"""
-    help_text = (
-        "📚 Помощь по командам:\n\n"
-        "/start - приветственное сообщение\n"
-        "/tasks - показать все ваши задачи\n"
-        "/add - добавить новую задачу\n"
-        "/help - эта справка\n\n"
-        "💡 Бот сохраняет задачи в системе и напомнит о них!"
+        "🆔 Ваш ID: `{user_id}`".format(user_id=message.from_user.id),
+        parse_mode="Markdown"
     )
-    await message.answer(help_text)
+
+    # Проверяем доступность API
+    if not await check_api_health():
+        await message.answer("⚠️ *Внимание:* Сервер задач временно недоступен. Попробуйте позже.",
+                             parse_mode="Markdown")
+
+
+@dp.message(Command("menu"))
+async def cmd_menu(message: Message, dialog_manager: DialogManager):
+    await dialog_manager.start(TaskDialog.main, mode=StartMode.RESET_STACK)
 
 
 @dp.message(Command("tasks"))
 async def cmd_tasks(message: Message):
-    """Показать задачи пользователя"""
     user_id = message.from_user.id
 
-    # Показываем "типинг" (бот печатает) - ИСПРАВЛЕННАЯ СТРОКА
-    await bot.send_chat_action(message.chat.id, "typing")
-
-    # Получаем задачи через API
-    tasks = await api_client.get_tasks(user_id)
+    async with APIClient(API_URL) as client:
+        tasks = await client.get_tasks(user_id)
 
     if not tasks:
         await message.answer("📭 У вас пока нет задач.\nИспользуйте /add чтобы создать первую.")
         return
 
-    # Формируем сообщение с задачами
-    response = "📋 Ваши задачи:\n\n"
+    response = "📋 *Ваши задачи:*\n\n"
 
     for i, task in enumerate(tasks, 1):
-        # Форматируем дату создания
-        created_at = task['created_at']
+        created_at = task.get('created_at', '')
         try:
-            # Парсим дату из формата Django
             dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
             formatted_date = dt.strftime("%d.%m.%Y %H:%M")
         except:
             formatted_date = created_at
 
-        # Форматируем дату выполнения (если есть)
-        due_date_str = ""
+        status = "✅" if task.get('completed') else "⏳"
+
+        response += f"{i}. {status} *{task['title']}*\n"
+
+        if task.get('description'):
+            desc = task['description'][:50] + "..." if len(task['description']) > 50 else task['description']
+            response += f"   📝 {desc}\n"
+
+        response += f"   📅 Создано: {formatted_date}\n"
+
         if task.get('due_date'):
             try:
                 due_dt = datetime.fromisoformat(task['due_date'].replace('Z', '+00:00'))
-                due_date_str = f"📅 Срок: {due_dt.strftime('%d.%m.%Y')}"
+                due_date_str = due_dt.strftime('%d.%m.%Y %H:%M')
+                response += f"   ⏰ Срок: {due_date_str}\n"
             except:
-                due_date_str = f"📅 Срок: {task['due_date']}"
+                pass
 
-        # Получаем категории
-        categories = ""
         if task.get('categories'):
             cat_names = [cat['name'] for cat in task['categories']]
-            categories = f"🏷️ Категории: {', '.join(cat_names)}"
+            response += f"   🏷️ Категории: {', '.join(cat_names)}\n"
 
-        # Добавляем задачу в ответ
-        response += f"{i}. {task['title']}\n"
-        response += f"   📝 {task.get('description') or 'без описания'}\n"
-        response += f"   📅 Создано: {formatted_date}\n"
-        if due_date_str:
-            response += f"   {due_date_str}\n"
-        if categories:
-            response += f"   {categories}\n"
         response += "\n"
 
-    # Добавляем статистику
-    response += f"📊 Всего задач: {len(tasks)}"
+    response += f"📊 *Всего задач: {len(tasks)}*"
 
-    # Telegram ограничивает сообщения 4096 символами
     if len(response) > 4000:
         response = response[:4000] + "\n\n... (сообщение сокращено)"
 
-    await message.answer(response)
+    await message.answer(response, parse_mode="Markdown")
 
 
 @dp.message(Command("add"))
-async def cmd_add(message: Message):
-    """Начать добавление задачи"""
-    await message.answer(
-        "➕ Чтобы добавить задачу, введите её в формате:\n\n"
-        "Название\n"
-        "Описание (необязательно)\n\n"
-        "📅 Чтобы добавить срок, добавьте третьей строкой дату в формате ДД.ММ.ГГГГ\n\n"
-        "Пример:\n"
-        "Купить хлеб\n"
-        "В магазине у дома\n"
-        "20.12.2024"
+async def cmd_add(message: Message, dialog_manager: DialogManager):
+    await dialog_manager.start(TaskDialog.add_task_title, mode=StartMode.RESET_STACK)
+
+
+@dp.message(Command("help"))
+async def cmd_help(message: Message):
+    help_text = (
+        "📚 *Помощь по командам:*\n\n"
+        "/start - приветственное сообщение\n"
+        "/menu - открыть интерактивное меню\n"
+        "/tasks - показать все ваши задачи\n"
+        "/add - добавить новую задачу\n"
+        "/help - эта справка\n\n"
+        "💡 *Советы:*\n"
+        "• Вы можете добавлять задачи через меню или командой /add\n"
+        "• Задачи можно категоризировать\n"
+        "• Бот напомнит о просроченных задачах\n\n"
+        "🔄 *Обновления:*\n"
+        "Следите за обновлениями бота!"
+    )
+    await message.answer(help_text, parse_mode="Markdown")
+
+
+@dp.message(Command("health"))
+async def cmd_health(message: Message):
+    api_healthy = await check_api_health()
+    status = "✅" if api_healthy else "❌"
+
+    response = (
+        f"*Состояние системы:*\n\n"
+        f"🤖 Бот: {status} Работает\n"
+        f"🔗 API: {'✅ Доступен' if api_healthy else '❌ Недоступен'}\n"
+        f"🆔 Ваш ID: `{message.from_user.id}`"
     )
 
+    await message.answer(response, parse_mode="Markdown")
 
-# ---------- Обработка обычных сообщений ----------
 
-@dp.message()
+@dp.message(F.text)
 async def handle_text(message: Message):
-    """Обработка обычных сообщений"""
     text = message.text.strip()
 
-    # Если сообщение многострочное — возможно, это задача
-    if '\n' in text:
-        lines = text.split('\n')
-        if 1 <= len(lines) <= 3:
-            # Создаем задачу
-            await create_task_from_text(message, lines)
-            return
-
-    # Иначе — неизвестная команда
-    await message.answer(
-        "🤔 Не понял команду. Используйте:\n"
-        "/start, /help, /tasks, /add"
-    )
-
-
-async def create_task_from_text(message: Message, lines: list):
-    """Создать задачу из текста"""
-    title = lines[0].strip()
-    description = lines[1].strip() if len(lines) > 1 else ""
-    due_date_str = lines[2].strip() if len(lines) > 2 else None
-
-    # Подготавливаем данные для API
-    task_data = {
-        "title": title,
-        "description": description,
-        "user_id": message.from_user.id,
-    }
-
-    # Парсим дату, если есть
-    if due_date_str:
-        try:
-            from datetime import datetime
-            due_date = datetime.strptime(due_date_str, "%d.%m.%Y")
-            # Конвертируем в ISO формат
-            task_data["due_date"] = due_date.isoformat()
-        except ValueError:
-            await message.answer("❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ")
-            return
-
-    # Отправляем задачу в API
-    success = await api_client.create_task(task_data)
-
-    if success:
-        await message.answer(f"✅ Задача '{title}' успешно добавлена!")
-        if due_date_str:
-            await message.answer(f"📅 Срок выполнения: {due_date_str}")
+    if text.lower() in ['меню', 'menu', 'старт', 'start']:
+        await cmd_menu(message, DialogManager)
+    elif text.lower() in ['задачи', 'tasks']:
+        await cmd_tasks(message)
+    elif text.lower() in ['помощь', 'help', 'справка']:
+        await cmd_help(message)
     else:
-        await message.answer("❌ Ошибка при сохранении задачи. Попробуйте позже.")
+        await message.answer(
+            "🤔 Не понял команду. Используйте:\n"
+            "/start, /menu, /help\n\n"
+            "Или напишите 'меню' для открытия меню."
+        )
 
 
-# ---------- Запуск бота ----------
+async def on_startup():
+    logger.info("Бот запускается...")
+
+    if await check_api_health():
+        logger.info("API доступен")
+    else:
+        logger.warning("API недоступен")
+
+
+async def on_shutdown():
+    logger.info("Бот останавливается...")
+
 
 async def main():
-    logging.info("🚀 Бот запускается...")
+    logger.info("Запуск бота...")
+
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+
+    # Регистрируем диалоги
+    dp.include_router(task_dialog)
+    setup_dialogs(dp)
+
     await dp.start_polling(bot)
 
 

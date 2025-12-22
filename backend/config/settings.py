@@ -10,8 +10,11 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 
+load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -19,12 +22,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-yvy977g6q*^gv%sv7af7hk^_i(w%sw3w9y=+89c(w(vwo@0a_2'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'The_Suffering_1996')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # Application definition
 
@@ -37,6 +40,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'django_filters',  # для фильтрации в API
+    'django_celery_beat',
+    'corsheaders', # на будущее
     'tasks',  # наше приложение чтоб джанго видел
 ]
 
@@ -44,6 +49,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'corsheaders.middleware.CorsMiddleware',    #на будущее
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -74,10 +80,15 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('POSTGRES_DB', 'todolist_db'),
+        'USER': os.environ.get('POSTGRES_USER', 'todolist_user'),
+        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', ''),
+        'HOST': os.environ.get('POSTGRES_HOST', 'postgres'),
+        'PORT': os.environ.get('POSTGRES_PORT', '5432'),
     }
 }
+
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -100,42 +111,66 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
-
+LANGUAGE_CODE = 'ru-ru'
 TIME_ZONE = 'America/Adak'  # если нужно, значит нужно
-
 USE_I18N = True
-
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
-
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly',
+    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.BasicAuthentication',
     ],
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
-}  # доступ API-запросов, для разработки
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20
+}  # доступ API-запросов, для разработки (Исправлено)
 
 # Настройки Celery
-CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Для Docker будет redis, для локально localhost
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'  # Место, где будут храниться результаты выполнения задач
-CELERY_ACCEPT_CONTENT = ['json']  # Список форматов данных, которые Celery разрешено принимать.
-CELERY_TASK_SERIALIZER = 'json'  # Определяет, в каком формате задача будет «упакована» перед отправкой в Redis.
-CELERY_RESULT_SERIALIZER = 'json'  # Определяет формат «упаковки» результата выполнения задачи.
-CELERY_TIMEZONE = 'America/Adak'  # Часовой пояс такой же как в Django
-
+# Для Docker будет redis, для локально localhost
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
+# Место, где будут храниться результаты выполнения задач
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
+# Список форматов данных, которые Celery разрешено принимать.
+CELERY_ACCEPT_CONTENT = ['json']
+# Определяет, в каком формате задача будет «упакована» перед отправкой в Redis.
+CELERY_TASK_SERIALIZER = 'json'
+# Определяет формат «упаковки» результата выполнения задачи.
+CELERY_RESULT_SERIALIZER = 'json'
+# Часовой пояс такой же как в Django
+CELERY_TIMEZONE = TIME_ZONE
 # Расписание для периодических задач (Celery Beat) с будильником
-CELERY_BEAT_SCHEDULE = {
-    'check-overdue-tasks-every-5-minutes': {
-        'task': 'tasks.tasks.check_overdue_tasks',
-        'schedule': 30.0,  # Каждые 300 секунд (5 минут)
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+CORS_ALLOW_CREDENTIALS = True
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
     },
 }

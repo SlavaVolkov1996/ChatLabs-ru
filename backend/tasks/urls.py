@@ -4,9 +4,7 @@ from .views import TaskViewSet, CategoryViewSet
 
 # локальные маршруты
 router = DefaultRouter()
-router.register('tasks', TaskViewSet)
-router.register('categories', CategoryViewSet)
+router.register(r'tasks', TaskViewSet, basename='task')
+router.register(r'categories', CategoryViewSet, basename='category')
 
-urlpatterns = [
-    path('', include(router.urls)),
-]
+urlpatterns = [path('', include(router.urls))]
