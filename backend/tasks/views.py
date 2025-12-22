@@ -12,7 +12,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
     # объединяем логику для категорий
     queryset = Category.objects.all()  # работаем со всеми категориями.
     serializer_class = CategorySerializer  # используем созданный сериализатор.
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.AllowAny]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name']
     ordering_fields = ['name', 'created_at']
@@ -21,7 +21,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.AllowAny]
     # фильтрация
     filter_backends = [DjangoFilterBackend, filters.SearchFilter,
                        filters.OrderingFilter]  # список классов для фильтрации, поиска и сортировки.

@@ -161,22 +161,22 @@ async def cmd_health(message: Message):
     await message.answer(response, parse_mode="Markdown")
 
 
-@dp.message(F.text)
-async def handle_text(message: Message):
-    text = message.text.strip()
-
-    if text.lower() in ['меню', 'menu', 'старт', 'start']:
-        await cmd_menu(message, DialogManager)
-    elif text.lower() in ['задачи', 'tasks']:
-        await cmd_tasks(message)
-    elif text.lower() in ['помощь', 'help', 'справка']:
-        await cmd_help(message)
-    else:
-        await message.answer(
-            "🤔 Не понял команду. Используйте:\n"
-            "/start, /menu, /help\n\n"
-            "Или напишите 'меню' для открытия меню."
-        )
+# @dp.message(F.text)
+# async def handle_text(message: Message):
+#     text = message.text.strip()
+#
+#     if text.lower() in ['меню', 'menu', 'старт', 'start']:
+#         await cmd_menu(message, DialogManager)
+#     elif text.lower() in ['задачи', 'tasks']:
+#         await cmd_tasks(message)
+#     elif text.lower() in ['помощь', 'help', 'справка']:
+#         await cmd_help(message)
+#     else:
+#         await message.answer(
+#             "🤔 Не понял команду. Используйте:\n"
+#             "/start, /menu, /help\n\n"
+#             "Или напишите 'меню' для открытия меню."
+#         )
 
 
 async def on_startup():
